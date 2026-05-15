@@ -1,0 +1,21 @@
+[submodule "Map-Service"]
+	path = Map-Service
+	url = https://github.com/Estadio-do-Dragao-app/Map-Service
+[submodule "Congestion-Service"]
+	path = Congestion-Service
+	url = https://github.com/Estadio-do-Dragao-app/Congestion-Service
+[submodule "Input-Processor"]
+	path = Input-Processor
+	url = https://github.com/Estadio-do-Dragao-app/Input-Processor
+[submodule "WaitTime-Service"]
+	path = WaitTime-Service
+	url = https://github.com/Estadio-do-Dragao-app/WaitTime-Service
+[submodule "Routing-Service-Fanapp"]
+	path = Routing-Service-Fanapp
+	url = https://github.com/Estadio-do-Dragao-app/Routing-Service-Fanapp
+[submodule "Alert-Service"]
+	path = Alert-Service
+	url = https://github.com/Estadio-do-Dragao-app/Alert-Service
+[submodule "Stadium-Event-Generator"]
+	path = Stadium-Event-Generator
+	url = https://github.com/Estadio-do-Dragao-app/Stadium-Event-Generator
