@@ -1,0 +1,37 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Métricas nativas /metrics dos serviços FastAPI
+  - job_name: 'fastapi-services'
+    static_configs:
+      - targets:
+          - waittime-service:8001    # prometheus-fastapi-instrumentator ativo
+          - congestion-service:8000  # prometheus-fastapi-instrumentator ativo
+          - mapservice:8000          # prometheus-fastapi-instrumentator adicionado
+          - routing-service:8002     # prometheus-fastapi-instrumentator adicionado
+
+  # Disponibilidade HTTP via blackbox (health checks)
+  - job_name: 'blackbox-health'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://mapservice:8000/health
+          - http://waittime-service:8001/health
+          - http://routing-service:8002/health
+          - http://congestion-service:8000/health
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
