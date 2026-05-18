@@ -1,0 +1,391 @@
+# =============================================================
+# Dragao-app Unified Orchestration (Shared Nothing Version)
+# =============================================================
+
+services:
+
+  # ============================================================
+  # 1. MQTT Broker — Unified (Stadium Events + Client Services)
+  # ============================================================
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: mosquitto
+    ports:
+      # Internal Ports
+      - "1883:1883"
+      - "9001:9001"
+      # External Secure Ports (MQTTS & WSS)
+      - "8883:8883"
+      - "9003:9003"
+    volumes:
+      - ./docker-config/mosquitto:/mosquitto/config:ro
+      - ./docker-config/certs:/mosquitto/certs:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+    networks:
+      - stadium-network
+      - client-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "mosquitto_pub", "-t", "healthcheck", "-m", "ping", "-p", "1883", "-u", "services", "-P", "dragao_mqtt_2026"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+#  # ============================================================
+  # 3. Map-Service — PostgreSQL + API (Instituto data)
+  # ============================================================
+  map-postgres:
+    image: postgres:15-alpine
+    container_name: map-service-db
+    environment:
+      POSTGRES_USER: ${MAP_DB_USER}
+      POSTGRES_PASSWORD: ${MAP_DB_PASSWORD}
+      POSTGRES_DB: ${MAP_DB_NAME}
+    ports:
+      - "5434:5432"
+    volumes:
+      - map-postgres-data:/var/lib/postgresql/data
+    networks:
+      - map-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  mapservice:
+    build:
+      context: ./Map-Service
+      dockerfile: Dockerfile
+    container_name: mapservice
+    depends_on:
+      map-postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URI: postgresql://${MAP_DB_USER}:${MAP_DB_PASSWORD}@map-postgres:5432/${MAP_DB_NAME}
+      MAP_MODE: outdoor
+      DEBUG: "false"
+      API_KEY: ${API_KEY}
+    networks:
+      - map-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\"" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ============================================================
+  # 4b. Map-Service Dashboard (Backend + Frontend)
+  # ============================================================
+  dashboard-backend:
+    build:
+      context: ./Map-Service/dashboard/backend
+      dockerfile: Dockerfile
+    container_name: dashboard-backend
+    depends_on:
+      mapservice:
+        condition: service_healthy
+    environment:
+      MAP_SERVICE_URL: http://mapservice:8000
+    ports:
+      - "8015:8000"
+    networks:
+      - map-network
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\"" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  dashboard-frontend:
+    build:
+      context: ./Map-Service/dashboard/frontend
+      dockerfile: Dockerfile
+    container_name: dashboard-frontend
+    depends_on:
+      dashboard-backend:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+    networks:
+      - map-network
+    restart: unless-stopped
+
+  # ============================================================
+  # 4. Input Processor (YOLOv8 Edge Computer Vision)
+  # ============================================================
+  input-processor:
+    build:
+      context: ./Input-Processor
+      dockerfile: Dockerfile
+    container_name: input-processor
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - MQTT_BROKER_HOST=mosquitto
+      - ROIS_PATH=/app/rois.json
+      - MQTT_USER=${MQTT_USER}
+      - MQTT_PASS=${MQTT_PASS}
+    networks:
+      - stadium-network
+    # -- CONFIGURAÇÃO DE CÂMARAS FÍSICAS --
+    # Para ligar webcams reais (USB/Integradas) descomenta as 3 linhas abaixo e faz 'docker compose up -d':
+    # privileged: true
+    # devices:
+    #   - "/dev/video0:/dev/video0"
+    restart: on-failure
+
+  # ============================================================
+  # 5. WaitTime-Service — PostgreSQL + API
+  # ============================================================
+  waittime-postgres:
+    image: postgres:15-alpine
+    container_name: waittime-postgres
+    environment:
+      POSTGRES_DB: ${WAITTIME_DB_NAME}
+      POSTGRES_USER: ${WAITTIME_DB_USER}
+      POSTGRES_PASSWORD: ${WAITTIME_DB_PASSWORD}
+    ports:
+      - "5436:5432"
+    volumes:
+      - waittime-postgres-data:/var/lib/postgresql/data
+    networks:
+      - waittime-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+#
+  waittime-service:
+    build:
+      context: ./WaitTime-Service
+      dockerfile: Dockerfile
+    container_name: waittime-service
+    depends_on:
+      waittime-postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: waittime-postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${WAITTIME_DB_NAME}
+      POSTGRES_USER: ${WAITTIME_DB_USER}
+      POSTGRES_PASSWORD: ${WAITTIME_DB_PASSWORD}
+      DOWNSTREAM_BROKER_HOST: mosquitto
+      DOWNSTREAM_BROKER_PORT: 8883
+      DOWNSTREAM_TOPIC_QUEUES: stadium/events/queues
+      UPSTREAM_BROKER_HOST: mosquitto
+      UPSTREAM_BROKER_PORT: 8883
+      UPSTREAM_TOPIC_PREFIX: stadium/services/waittime
+      SERVICE_PORT: 8001
+      LOG_LEVEL: DEBUG
+      MQTT_CA_CERT: /certs/ca.crt
+      MQTT_USER: ${MQTT_USER}
+      MQTT_PASS: ${MQTT_PASS}
+      API_KEY: ${API_KEY}
+    volumes:
+      - ./docker-config/certs/ca.crt:/certs/ca.crt:ro
+    networks:
+      - waittime-network
+      - stadium-network
+      - client-network
+      - map-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+    restart: unless-stopped
+#
+  # ============================================================
+  # 6. Congestion-Service
+  # ============================================================
+  congestion-service:
+    build:
+      context: ./Congestion-Service
+      dockerfile: Dockerfile
+    container_name: congestion-service
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - MQTT_BROKER=mosquitto
+      - MQTT_PORT=8883
+      - SIMULATOR_BROKER=mosquitto
+      - SIMULATOR_PORT=8883
+      - SIMULATOR_TOPIC=stadium/events/congestion
+      - CLIENT_TOPIC=stadium/services/congestion
+      - MQTT_CA_CERT=/certs/ca.crt
+      - MQTT_USER=${MQTT_USER}
+      - MQTT_PASS=${MQTT_PASS}
+      - API_KEY=${API_KEY}
+    volumes:
+      - ./docker-config/certs/ca.crt:/certs/ca.crt:ro
+    networks:
+      - stadium-network
+      - client-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+    restart: unless-stopped
+#
+  # ============================================================
+  # 7. Alert-Service
+  # ============================================================
+  alert-service:
+    build:
+      context: ./Alert-Service
+      dockerfile: Dockerfile
+    container_name: alert-service
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    environment:
+      - MQTT_BROKER=mosquitto
+      - MQTT_PORT=8883
+      - SIMULATOR_BROKER=mosquitto
+      - SIMULATOR_PORT=8883
+      - SIMULATOR_TOPIC=stadium/events/alerts
+      - CLIENT_TOPIC_PREFIX=alerts/client
+      - MQTT_CA_CERT=/certs/ca.crt
+      - MQTT_USER=${MQTT_USER}
+      - MQTT_PASS=${MQTT_PASS}
+    volumes:
+      - ./docker-config/certs/ca.crt:/certs/ca.crt:ro
+    networks:
+      - stadium-network
+      - client-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    restart: unless-stopped
+
+  # ============================================================
+  # 8. Routing-Service
+  # ============================================================
+  routing-service:
+    build:
+      context: ./Routing-Service-Fanapp
+      dockerfile: Dockerfile
+    container_name: routing-service
+    depends_on:
+      - mapservice
+      - mosquitto
+    environment:
+      - CLIENT_BROKER=mosquitto
+      - CLIENT_PORT=8883
+      - MAP_SERVICE_URL=http://mapservice:8000
+      - WAITTIME_SERVICE_URL=http://waittime-service:8001
+      - CONGESTION_SERVICE_URL=http://congestion-service:8000
+      - MQTT_CA_CERT=/certs/ca.crt
+      - MQTT_USER=${MQTT_USER}
+      - MQTT_PASS=${MQTT_PASS}
+      - API_KEY=${API_KEY}
+    volumes:
+      - ./docker-config/certs/ca.crt:/certs/ca.crt:ro
+    networks:
+      - client-network
+      - map-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8002/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================================
+  # 9. Nginx Gateway — Reverse Proxy (HTTPS)
+  # ============================================================
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-gateway
+    depends_on:
+      - mapservice
+      - waittime-service
+      - routing-service
+      - congestion-service
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker-config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker-config/certs:/etc/nginx/certs:ro
+    networks:
+      - stadium-network
+      - client-network
+      - map-network
+      - waittime-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-k", "-f", "https://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+
+# ==============================================================
+# Networks
+# ==============================================================
+networks:
+  stadium-network:
+    driver: bridge
+  client-network:
+    driver: bridge
+  map-network:
+    driver: bridge
+  waittime-network:
+    driver: bridge
+
+# ==============================================================
+# Volumes
+# ==============================================================
+volumes:
+  map-postgres-data:
+  waittime-postgres-data:
+  mosquitto-data:
+  mosquitto-log:

@@ -16,6 +16,3 @@
 [submodule "Alert-Service"]
 	path = Alert-Service
 	url = https://github.com/Estadio-do-Dragao-app/Alert-Service
-[submodule "Stadium-Event-Generator"]
-	path = Stadium-Event-Generator
-	url = https://github.com/Estadio-do-Dragao-app/Stadium-Event-Generator
