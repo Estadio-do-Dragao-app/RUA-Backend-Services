@@ -1,0 +1,36 @@
+# Certificados e segredos (já tens)
+*.crt
+*.pem
+*.key
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+
+# Docker
+.dockerenv
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Testes / k6
+k6-summary.json  
+report.html        

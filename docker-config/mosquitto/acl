@@ -1,0 +1,19 @@
+# =============================================================
+# Smart Stadium MQTT Access Control List (ACL)
+# =============================================================
+
+# ── 1. Internal Services Account (Admin) ──
+user services
+topic readwrite #
+
+# ── 2. Fanapp Mobile Clients (Restricted) ──
+user fanapp
+
+# Subscriptions (Read-only)
+topic read stadium/events/#
+topic read stadium/services/#
+topic read alerts/client/#
+
+# Publications (Write-only / Limited)
+topic write stadium/location/gps
+topic write alerts/ack/#

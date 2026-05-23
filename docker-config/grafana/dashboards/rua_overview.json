@@ -14,7 +14,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "probe_success{job=\"blackbox-http\"}",
+          "expr": "probe_success{job=\"blackbox-health\"}",
           "legendFormat": "{{instance}}"
         }
       ],
@@ -41,7 +41,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "probe_duration_seconds{job=\"blackbox-http\"} * 1000",
+          "expr": "probe_duration_seconds{job=\"blackbox-health\"} * 1000",
           "legendFormat": "{{instance}}"
         }
       ],
@@ -60,7 +60,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "probe_success{job=\"blackbox-api\"}",
+          "expr": "probe_success{job=\"blackbox-health\"}",
           "legendFormat": "{{instance}}"
         }
       ],
@@ -86,7 +86,7 @@
       "targets": [
         {
           "datasource": "Prometheus",
-          "expr": "probe_duration_seconds{job=\"blackbox-api\"} * 1000",
+          "expr": "probe_duration_seconds{job=\"blackbox-health\"} * 1000",
           "legendFormat": "{{instance}}"
         }
       ],

@@ -10,11 +10,9 @@ services:
   mosquitto:
     image: eclipse-mosquitto:2.0
     container_name: mosquitto
+    user: "1883:1883"
     ports:
-      # Internal Ports
-      - "1883:1883"
-      - "9001:9001"
-      # External Secure Ports (MQTTS & WSS)
+      # External Secure Ports (MQTTS & WSS) - TLS only
       - "8883:8883"
       - "9003:9003"
     volumes:
@@ -46,8 +44,6 @@ services:
       POSTGRES_USER: ${MAP_DB_USER}
       POSTGRES_PASSWORD: ${MAP_DB_PASSWORD}
       POSTGRES_DB: ${MAP_DB_NAME}
-    ports:
-      - "5434:5432"
     volumes:
       - map-postgres-data:/var/lib/postgresql/data
     networks:
@@ -105,8 +101,6 @@ services:
         condition: service_healthy
     environment:
       MAP_SERVICE_URL: http://mapservice:8000
-    ports:
-      - "8015:8000"
     networks:
       - map-network
     restart: unless-stopped
@@ -126,7 +120,7 @@ services:
       dashboard-backend:
         condition: service_healthy
     ports:
-      - "8080:80"
+      - "8080:8080"
     networks:
       - map-network
     restart: unless-stopped
@@ -145,6 +139,8 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - MQTT_BROKER_HOST=mosquitto
+      - MQTT_BROKER_PORT=8883
+      - MQTT_CA_CERT=/certs/ca.crt
       - ROIS_PATH=/app/rois.json
       - MQTT_USER=${MQTT_USER}
       - MQTT_PASS=${MQTT_PASS}
@@ -156,6 +152,52 @@ services:
     # devices:
     #   - "/dev/video0:/dev/video0"
     restart: on-failure
+    volumes:
+      - ./docker-config/certs/ca.crt:/certs/ca.crt:ro
+
+  # Camera simulator (edge device simulator)
+  camera-simulator:
+    build:
+      context: ./Input-Processor
+    container_name: camera-simulator
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - MQTT_BROKER_HOST=mosquitto
+      - MQTT_BROKER_PORT=8883
+      - MQTT_CA_CERT=/certs/ca.crt
+      - MQTT_USER=${MQTT_USER}
+      - MQTT_PASS=${MQTT_PASS}
+      - ROIS_PATH=/app/rois.json
+    networks:
+      - stadium-network
+    restart: on-failure
+    volumes:
+      - ./docker-config/certs/ca.crt:/certs/ca.crt:ro
+
+  # GPS processor (headless runner)
+  gps-processor:
+    build:
+      context: ./Input-Processor
+    container_name: gps-processor
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - MQTT_BROKER_HOST=mosquitto
+      - MQTT_BROKER_PORT=8883
+      - MQTT_CA_CERT=/certs/ca.crt
+      - MQTT_USER=${MQTT_USER}
+      - MQTT_PASS=${MQTT_PASS}
+    command: python3 -u src/main.py --headless
+    networks:
+      - stadium-network
+    restart: on-failure
+    volumes:
+      - ./docker-config/certs/ca.crt:/certs/ca.crt:ro
 
   # ============================================================
   # 5. WaitTime-Service — PostgreSQL + API
@@ -167,8 +209,6 @@ services:
       POSTGRES_DB: ${WAITTIME_DB_NAME}
       POSTGRES_USER: ${WAITTIME_DB_USER}
       POSTGRES_PASSWORD: ${WAITTIME_DB_PASSWORD}
-    ports:
-      - "5436:5432"
     volumes:
       - waittime-postgres-data:/var/lib/postgresql/data
     networks:
@@ -225,7 +265,9 @@ services:
         limits:
           cpus: '0.50'
           memory: 512M
-    restart: unless-stopped
+    init: true
+    stop_grace_period: 20s
+    restart: "on-failure:3"
 #
   # ============================================================
   # 6. Congestion-Service
@@ -260,7 +302,9 @@ services:
         limits:
           cpus: '0.50'
           memory: 512M
-    restart: unless-stopped
+    init: true
+    stop_grace_period: 20s
+    restart: "on-failure:3"
 #
   # ============================================================
   # 7. Alert-Service
@@ -360,12 +404,74 @@ services:
         limits:
           cpus: '0.25'
           memory: 256M
+    entrypoint: /bin/sh -c "rm -f /etc/nginx/conf.d/*.conf && nginx -g 'daemon off;'"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-k", "-f", "https://localhost/health"]
       interval: 10s
       timeout: 5s
       retries: 3
+
+  # ============================================================
+  # Monitoring stack
+  # ============================================================
+  blackbox-exporter:
+    image: prom/blackbox-exporter:latest
+    container_name: blackbox-exporter
+    networks:
+      - monitoring-network
+      - stadium-network
+      - client-network
+      - map-network
+      - waittime-network
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./docker-config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - monitoring-network
+      - stadium-network
+      - client-network
+      - map-network
+      - waittime-network
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./docker-config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker-config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - monitoring-network
+    restart: unless-stopped
+
+  # Load testing (optional)
+  k6:
+    image: grafana/k6:latest
+    container_name: k6
+    profiles: ["testing"]
+    volumes:
+      - ./k6:/scripts
+    command: run /scripts/load_test.js
+    networks:
+      - client-network
+      - map-network
+      - waittime-network
 
 
 # ==============================================================
@@ -380,6 +486,8 @@ networks:
     driver: bridge
   waittime-network:
     driver: bridge
+  monitoring-network:
+    driver: bridge
 
 # ==============================================================
 # Volumes
@@ -389,3 +497,5 @@ volumes:
   waittime-postgres-data:
   mosquitto-data:
   mosquitto-log:
+  prometheus-data:
+  grafana-data:
