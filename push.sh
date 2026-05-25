@@ -1,7 +1,4 @@
 #!/bin/bash
-eval $(ssh-agent -s)
-ssh-add ~/.ssh/PEI_key
-
 git submodule foreach '
   git checkout -B vm-changes &&
   git add . &&
