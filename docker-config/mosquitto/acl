@@ -13,6 +13,7 @@ user fanapp
 topic read stadium/events/#
 topic read stadium/services/#
 topic read alerts/client/#
+topic read alerts/broadcast
 
 # Publications (Write-only / Limited)
 topic write stadium/location/gps

@@ -155,6 +155,8 @@ services:
     volumes:
       - ./docker-config/certs/ca.crt:/certs/ca.crt:ro
 
+    # -- CONFIGURAÇÃO DE CÂMARAS FÍS
+
   # Camera simulator (edge device simulator)
   camera-simulator:
     build:
@@ -192,7 +194,7 @@ services:
       - MQTT_CA_CERT=/certs/ca.crt
       - MQTT_USER=${MQTT_USER}
       - MQTT_PASS=${MQTT_PASS}
-    command: python3 -u src/main.py --headless
+    command: python3 -u test_gps.py
     networks:
       - stadium-network
     restart: on-failure
