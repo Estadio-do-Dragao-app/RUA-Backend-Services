@@ -1,5 +1,4 @@
 #!/bin/bash
-git submodule update --init
-git submodule foreach 'git pull'
+git submodule foreach 'git checkout main && git pull'
 
 git pull origin main
