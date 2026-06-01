@@ -117,7 +117,7 @@ services:
       context: ./Map-Service/dashboard/frontend
       dockerfile: Dockerfile
       args:
-        VITE_DASHBOARD_API_BASE: ${VITE_DASHBOARD_API_BASE}
+        VITE_DASHBOARD_API_BASE: ${VITE_DASHBOARD_API_BASE:-/api}
     container_name: dashboard-frontend
     depends_on:
       dashboard-backend:
